@@ -2,6 +2,7 @@
 #include <vector>
 #include <time.h>
 #include <fstream>
+#include <omp.h>
 
 // test read file
 
@@ -42,34 +43,64 @@ vector<vector<int>> readInput(const string& filename, int& numNodes) {
 
 }
 
+int getLength(int numThreads){
+    int length = 0;
+    while(numThreads > 1){
+        length++;
+        numThreads /= 2;
+    }
+    return length;
+}
+
+int calculateSolution(int threadUsed){
+    int solutionCount = 2;
+    while(solutionCount <= threadUsed){
+        solutionCount *= 2;
+    }
+    return solutionCount*2;
+}
+
+void getOption(int tid, int optionLength, vi &option){
+    int it = 0;
+
+    while(tid > 0){
+        option[it] = tid %2 == 1;
+        tid /= 2;
+        it++;
+    }
+}
+
 void solve(vi &selected, vi &visited, vector<vi> &matrix, int current, int node, int used, int maxEdge, int coveredNode){
     if(current == node || used >= maxNode || maxEdge < node - coveredNode) return;
     if(used < maxNode){
         //select current node
         selected[current] = 1;
+        used+=1;
 
         int coveredNode = 0;
-        for(int i=0; i<node; i++){
-            visited[i] += matrix[current][i];
-            coveredNode += visited[i] > 0;
+        for(int it1=0; it1<node; it1++){
+            visited[it1] += matrix[current][it1];
+            coveredNode += visited[it1] > 0;
         }
 
         if(coveredNode == node){
             if(used < maxNode){
                 maxNode = used;
-                for(int i=0; i<node; i++){
-                    ans[i] = selected[i];
+                #pragma omp critical
+                for(int jt1=0; jt1<node; jt1++){
+                    ans[jt1] = selected[jt1];
                 }
             }
         } 
-        solve(selected, visited, matrix, current+1, node, used+1, maxEdge-connected[current], coveredNode);
+        solve(selected, visited, matrix, current+1, node, used, maxEdge-connected[current], coveredNode);
         
         selected[current] = 0;
         coveredNode = 0;
-        //todo: optimize this part
-        for(int i=0; i<node; i++){
-            visited[i] -= matrix[current][i];
-            coveredNode += visited[i] > 0;
+        used-=1;
+
+        for(int it2=0; it2<node; it2++){
+            visited[it2] -= matrix[current][it2];
+            coveredNode += visited[it2] > 0;
         }
     }
     solve(selected, visited, matrix, current+1, node, used, maxEdge-connected[current], coveredNode);
@@ -77,25 +108,27 @@ void solve(vi &selected, vi &visited, vector<vi> &matrix, int current, int node,
 
 vi preSolve(vi &option, vector<vi> &matrix, vi &selected, vi &visited, int node, int maxEdge){
     int used = 0, coveredNode = 0;
-    for(int i=0; i<option.size(); i++){
-        selected[i] = option[i];
-        used += option[i];
-        if(selected[i]){
+    for(int x=0; x<option.size(); x++){
+        selected[x] = option[x];
+        if(selected[x]){
+            used++;
+            coveredNode = 0;
             for(int j=0; j<node; j++){
-                visited[j] += matrix[i][j];
+                visited[j] += matrix[x][j];
                 coveredNode += visited[j] > 0;
             }
 
             if(coveredNode == node){
                 if(used < maxNode){
                     maxNode = used;
-                    for(int i=0; i<node; i++){
-                        ans[i] = selected[i];
+                    #pragma omp critical
+                    for(int k=0; k<node; k++){
+                        ans[k] = selected[k];
                     }
                 }
             } 
         }
-        maxEdge -= connected[i];
+        maxEdge -= connected[x];
     }
     vi data{used, maxEdge, coveredNode};
     return data;
@@ -121,47 +154,28 @@ int main(int argc, char *argv[]){
         maxEdge += connected[i];
     }
 
-    vi selected(numNodes,0), visited(numNodes,0);
+    vi selected(numNodes,0), visited(numNodes,0), option, setting;
 
     ans = vi(numNodes,0);
 
     clock_t start, stop;
     start = clock();
 
-    if(numNodes < 8){
+    if(numNodes < 8 || omp_get_max_threads()<= 4){
         solve(selected, visited, matrix, 0, numNodes, 0, maxEdge, 0);
     }
     else{
-        vi selected2(numNodes,0), selected3(numNodes,0), selected4(numNodes,0);
-        vi visited2(numNodes,0), visited3(numNodes,0), visited4(numNodes,0);
-        #pragma omp parallel sections num_threads(4) shared(ans)
+        int threadUsed = min(12,omp_get_max_threads());
+        int baseSolution = calculateSolution(threadUsed);
+        int bitLength = getLength(baseSolution);
+        #pragma omp parallel num_threads(threadUsed) shared(ans, maxNode) private(option, selected, visited, setting)
         {   
-            #pragma omp section
-            {
-                vi option4{1,1};
-                vi setting4 = preSolve(option4, matrix, selected4, visited4, numNodes, maxEdge);
-                solve(selected4, visited4, matrix, 1, numNodes, setting4[0], setting4[1], setting4[2]);
-            }
-            
-            #pragma omp section
-            {
-                vi option3{1,0};
-                vi setting3 = preSolve(option3, matrix, selected3, visited3, numNodes, maxEdge);
-                solve(selected3, visited3, matrix, 1, numNodes, setting3[0], setting3[1], setting3[2]);
-            }
-
-            #pragma omp section
-            {
-                vi option2{0,1};
-                vi setting2 = preSolve(option2, matrix, selected2, visited2, numNodes, maxEdge);
-                solve(selected2, visited2, matrix, 1, numNodes, setting2[0], setting2[1], setting2[2]);
-            }
-            
-            #pragma omp section
-            {   
-                vi option1{0,0};
-                vi setting = preSolve(option1, matrix, selected, visited, numNodes, maxEdge);
-                solve(selected, visited, matrix, 2, numNodes, setting[0], setting[1], setting[2]);
+            #pragma omp for schedule(dynamic, 1)
+            for(int iterator=0; iterator<baseSolution; iterator++){
+                vi selected(numNodes,0), visited(numNodes,0), option(bitLength,0);
+                getOption(iterator, bitLength, option);
+                setting = preSolve(option, matrix, selected, visited, numNodes, maxEdge);
+                solve(selected, visited, matrix, bitLength, numNodes, setting[0], setting[1], setting[2]);
             }
         }
     }
@@ -169,6 +183,10 @@ int main(int argc, char *argv[]){
     stop = clock();
     double timeDifference = ((double)(stop - start)) / CLOCKS_PER_SEC;
     printf("Time taken: %.3f seconds\n", timeDifference);
+    printf("Minimum Node: %d\n", maxNode);
+    for(int i=0;i<numNodes;i++){
+        printf("%d", ans[i]);
+    }
 
     ofstream file(outputFilename);
     for(int i=0;i<numNodes;i++){
@@ -179,15 +197,24 @@ int main(int argc, char *argv[]){
 
 // g++ -O2 -o solution solution.cpp
 // ./solution ./testcase/grid-16-24 output
+// ./solution ./testcase/ring-35-35 output
 
-//grid-30-49 = 0.052
+//grid-30-49 = 0.066
+// Minimum Node: 8
+// 001001010100000100101000000001
 
-//ring-25-25 = 0.026
+//ring-25-25 = 0.010
+// Minimum Node: 9
+// 0010011110100001100010000
 
-//ring-35-35 = 4.988
-// 00100111000000110001000001100001110
+//ring-35-35 = 2.502
+// Minimum Node: 12
+// 01100111000000110001000100100001010
 
-//grid-40-67 = 15.305
+//grid-40-67 = 23.019
+// Minimum Node: 11
+// 1100010001000110000000001001101000000001
 
-//ring-40-40 = 83.492
-// 0011001010001110100011100100000100000010 = 14nodes
+//ring-40-40 = 77.727
+// Minimum Node: 14
+// 1001011010001110001011100100000000000100
