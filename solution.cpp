@@ -6,8 +6,6 @@
 #include <algorithm>
 #include <math.h>
 
-// test read file
-
 #define vi vector<int>
 #define pii pair<int,int>
 
@@ -205,15 +203,10 @@ int main(int argc, char *argv[]){
         priorityList.push_back({totalConnected, i});
     }
 
-    //TODO: use parallel merge sort
     sort(priorityList.begin(), priorityList.end(), piiGreater);
 
     minNode = findMinimumNode(matrix, selected, visited, numNodes);
 
-    clock_t start, stop;
-    start = clock();
-
-    printf("Minimum Node presolve: %d\n", minNode);
     if(numNodes < 8 || omp_get_max_threads()<= 2){
         vi selected(numNodes,0), visited(numNodes,0);
         solve(selected, visited, matrix, 0, numNodes, 0, maxEdge, 0);
@@ -222,9 +215,6 @@ int main(int argc, char *argv[]){
         int threadUsed = min(12,omp_get_max_threads());
         int baseSolution = pow(2, min(getLength(calculateSolution(threadUsed)), numNodes/2));
         int bitLength = getLength(baseSolution);
-        printf("Thread Used: %d\n", threadUsed);
-        // printf("Base Solution: %d\n", baseSolution);
-        // printf("Bit Length: %d\n", bitLength);
         #pragma omp parallel num_threads(threadUsed) shared(ans, minNode, matrix) private(option, selected, visited, setting)
         {   
             #pragma omp for schedule(dynamic, 1)
@@ -237,14 +227,6 @@ int main(int argc, char *argv[]){
         }
     }
 
-    stop = clock();
-    double timeDifference = ((double)(stop - start)) / CLOCKS_PER_SEC;
-    printf("Time taken: %.3f seconds\n", timeDifference);
-    printf("Minimum Node: %d\n", minNode);
-    for(int i=0;i<numNodes;i++){
-        printf("%d", ans[i]);
-    }
-
     ofstream file(outputFilename);
     for(int i=0;i<numNodes;i++){
         file << ans[i];
@@ -253,8 +235,6 @@ int main(int argc, char *argv[]){
 }
 
 // g++ -O2 -fopenmp -o solution solution.cpp
-// ./solution ./testcase/grid-16-24 output
-// ./solution ./testcase/ring-35-35 output
 
 //grid-30-49 = 0.024
 // Minimum Node: 8
